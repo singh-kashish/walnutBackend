@@ -1,14 +1,11 @@
+# main.py
 from dotenv import load_dotenv
-
-from app import app
-from process_transaction import queue
-
-_ = load_dotenv()
+from app import app, init_queue
 
 def main():
-    queue.start()
-    app.run()
-
+    load_dotenv()
+    init_queue()
+    app.run(host="0.0.0.0", port=5020)
 
 if __name__ == "__main__":
-	  main()
+    main()

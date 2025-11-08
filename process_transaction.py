@@ -1,35 +1,32 @@
-# import asyncio
-# from typing import Any, Dict
-# from datetime import datetime
-# from db.transaction import Status, Transaction
-# from lib.queue import AsyncEventQueue
+# process_transaction.py
+import asyncio
+from datetime import datetime, timezone
+from db.transaction import Transaction, Status
+from db.transaction_lock import release_lock
 
+async def process_transaction(event: dict):
+    txn_id = event.get("transaction_id")
+    if not txn_id:
+        print("[worker] missing transaction_id")
+        return
+    try:
+        print(f"[worker] started {txn_id}")
+        # Simulate external API latency (~30s)
+        await asyncio.sleep(30)
 
-# async def handle_txn(txn: Dict[str, Any]) -> None:
-#     # Mark as processing with timestamp
-#     try:
-#         print("txn received:", txn["transaction_id"])
-#         txn["status"] = Status.Processing.value
-#         txn["processing_started_at"] = datetime.timezone().UTC + "Z"
-#         Transaction().update(txn)
-
-#         # simulate external API / blocking call
-#         await asyncio.sleep(30)
-
-#         # finalize
-#         txn["status"] = Status.Processed.value
-#         txn["processed_at"] = datetime.timezone.UTC + "Z"
-#         Transaction().update(txn)
-#         print(f'Transaction "{txn["transaction_id"]}" processed.')
-#     except Exception as e:
-#         print(f"Error processing txn {txn.get('transaction_id')}: {e}")
-#         print(f'Transaction \"{txn["transaction_id"]}\" has been processed.' )
-
-# queue = AsyncEventQueue(
-#     handler=handle_txn,
-#     maxsize=1000,
-#     workers=5,               # increase for parallelism
-#     retry_attempts=3,
-#     retry_backoff_base=1.0,
-#     name="process-transactions",
-# )
+        tx = Transaction()
+        # Update atomically: only transition if still PROCESSING
+        update_payload = {
+            "transaction_id": txn_id,
+            "status": Status.Processed,
+            "processed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        data, code = tx.update(update_payload)
+        print(f"[worker] finished {txn_id} update_code={code} data={data}")
+    except Exception as e:
+        print(f"[worker] ERROR {txn_id}: {e}")
+    finally:
+        # Release lock regardless (to avoid stale locks)
+        ok = release_lock(txn_id)
+        if not ok:
+            print(f"[worker] WARN: failed to release lock for {txn_id}")
